@@ -1,0 +1,37 @@
+<flow-definition>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@2.12">
+    <script>
+      pipeline {
+        agent any
+        stages {
+          stage('Checkout') {
+            steps {
+              git 'https://github.com/SANTOSH146/Kerala-Tourism-Website-main.git'
+            }
+          }
+          stage('Build') {
+            steps {
+              sh 'make build'
+            }
+          }
+          stage('SonarQube Scan') {
+            steps {
+              script {
+                def scannerHome = tool 'SonarScanner'
+                sh "${scannerHome}/bin/sonar-scanner"
+              }
+            }
+          }
+          stage('Deploy') {
+            when {
+              expression { return currentBuild.result == 'SUCCESS' }
+            }
+            steps {
+              sh 'docker-compose up -d'
+            }
+          }
+        }
+      }
+    </script>
+  </definition>
+</flow-definition>
