@@ -1,0 +1,60 @@
+- name: Set up SonarQube and Jenkins integration
+  hosts: your_ec2_instance
+  tasks:
+    - name: Pull SonarQube Docker image
+      docker_image:
+        name: sonarqube
+        tag: latest
+        pull: yes
+
+    - name: Run SonarQube container
+      docker_container:
+        name: sonarqube
+        image: sonarqube
+        state: started
+        published_ports:
+          - "9000:9000"
+
+    - name: Wait for SonarQube to start
+      wait_for:
+        port: 9000
+        delay: 15
+        timeout: 60
+
+    - name: Create a new SonarQube project
+      uri:
+        url: "http://<SONARQUBE_URL>/api/projects/create"
+        method: POST
+        body: "key=your-project-key&name=Your Project Name"
+        user: "admin"  # Use admin credentials
+        password: "your-admin-password"
+        headers:
+          Content-Type: "application/x-www-form-urlencoded"
+      register: sonar_project_creation
+
+    - name: Generate a SonarQube token
+      uri:
+        url: "http://<SONARQUBE_URL>/api/user_tokens/generate"
+        method: POST
+        user: "admin"  # Use admin credentials
+        password: "your-admin-password"
+        body: "name=jenkins-token"
+        headers:
+          Content-Type: "application/x-www-form-urlencoded"
+      register: sonar_token_creation
+
+    - name: Set the SonarQube project key and token as environment variables for Jenkins
+      set_fact:
+        sonar_project_key: "your-project-key"
+        sonar_token: "{{ sonar_token_creation.json.token }}"
+
+    - name: Configure Jenkins job with SonarQube project key and token
+      uri:
+        url: "http://<JENKINS_URL>/job/your-jenkins-job/config.xml"
+        method: POST
+        user: "jenkins_user"
+        password: "jenkins_password"
+        body: "{{ lookup('file', 'jenkins-job-config.xml') }}"
+        headers:
+          Content-Type: "application/xml"
+      register: jenkins_job_update
