@@ -1,0 +1,77 @@
+---
+- name: Setup SonarQube using curl
+  hosts: all
+  become: yes
+  vars:
+    previous_password: "admin"  # Default SonarQube admin password
+    new_password: "1234"  # New password you want to set
+  tasks:
+    - name: Check if SonarQube container is already running
+      shell: docker ps -q -f name=sonarqube_container
+      register: sonarqube_running
+      ignore_errors: true
+    - name: Stop and remove existing SonarQube container if it exists
+      shell: |
+        docker stop sonarqube_container && docker rm sonarqube_container
+      when: sonarqube_running.stdout != ""
+      ignore_errors: true
+    - name: Pull SonarQube Docker image
+      shell: docker pull sonarqube:latest
+      register: pull_image_output
+      ignore_errors: true
+    - name: debug
+      debug:
+        var: pull_image_output.stdout
+    - name: Run SonarQube Docker container
+      shell: docker run -d --name sonarqube_container -p 9000:9000 sonarqube
+      register: run_container_output
+      ignore_errors: true
+    - name: debug
+      debug:
+        var: run_container_output.stdout
+    # Wait for SonarQube to start by polling its system status
+    - name: Wait for SonarQube to be fully operational
+      shell: |
+        for i in $(seq 1 50); do
+          status=$(curl -s {{ sonarqube_url }}/api/system/status | jq -r '.status')
+          if [ "$status" = "UP" ]; then
+            echo "SonarQube is operational"
+            exit 0
+          else
+            echo "SonarQube not ready, status: $status, retrying in 15 seconds (attempt $i/50)..."
+            sleep 15
+          fi
+        done
+        exit 1
+      register: sonarqube_status
+      retries: 50  # Increased retries for longer startup time
+      delay: 15  # Wait 15 seconds between retries
+      ignore_errors: yes
+    - name: Debug the SonarQube status result
+      debug:
+        var: sonarqube_status
+    - name: Fail if SonarQube did not fully start
+      fail:
+        msg: "SonarQube failed to start."
+      when: sonarqube_status.rc != 0
+    - name: Change SonarQube default admin password using curl
+      shell: |
+        curl -u admin:{{ previous_password }} -X POST "{{ sonarqube_url }}/api/users/change_password" \
+          -d "login=admin&password={{ new_password }}&previousPassword={{ previous_password }}"
+      register: password_change_output
+      ignore_errors: true
+    - name: debug
+      debug:
+        var: password_change_output.stdout
+    - name: Test new admin credentials with curl
+      shell: |
+        curl -u admin:{{ new_password }} -X GET "{{ sonarqube_url }}/api/users/search"
+      register: test_login_output
+      ignore_errors: true
+    - name: debug
+      debug:
+        var: test_login_output.stdout
+    - name: Fail if the new admin credentials did not work
+      fail:
+        msg: "Failed to log in with new admin credentials."
+      when: test_login_output.rc != 0
